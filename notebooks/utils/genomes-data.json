@@ -1,0 +1,44 @@
+{
+    "CellRanger":
+    {
+        "CellRangerArc":
+        {
+            "human": "https://cf.10xgenomics.com/supp/cell-arc/refdata-cellranger-arc-GRCh38-2020-A.tar.gz",
+            "mouse": "https://cf.10xgenomics.com/supp/cell-arc/refdata-cellranger-arc-mm10-2020-A-2.0.0.tar.gz"
+        },
+        "CellRangerAtac":
+        {
+            "human": "https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-GRCh38-2020-A-2.0.0.tar.gz",
+            "mouse": "https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-mm10-2020-A-2.0.0.tar.gz"
+        },
+        "CellRangerGex":
+        {
+            "human": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz",
+            "mouse": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-mm10-2020-A.tar.gz"
+        },
+        "CellRangerCellPlex":
+        {
+            "human": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz",
+            "mouse": "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-mm10-2020-A.tar.gz"
+        },
+        "ArchRCR":
+        {
+            "human": "https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-GRCh38-2020-A-2.0.0.tar.gz",
+            "mouse": "https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-mm10-2020-A-2.0.0.tar.gz"
+        }
+    },
+    "ArchR":
+    {
+        "ArchRCR":
+        {
+            "human": "hg38",
+            "mouse": "mm10"
+        },
+        "ArchRSA":
+        {
+            "human": "hg38",
+            "mouse": "mm10"
+        }
+    }
+
+}
