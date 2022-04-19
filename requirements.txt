@@ -1,0 +1,8 @@
+jupyter
+autopep8
+mysql-connector-python
+pyyaml
+pandas
+S3Path
+tqdm
+boto3
