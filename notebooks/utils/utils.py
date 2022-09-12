@@ -5,21 +5,193 @@ from pathlib import Path
 import importlib
 from mysql.connector import connect, Error
 
+########## SCRIdb queries ##########
 
-# Numpy encoder for JSON from pandas series
-class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
+def execute_query(query, creds):
+    
+    user = creds['user']
+    password = creds['password']
+
+    with connect(
+        host="peer-lab-db.cggxmlwgzzpw.us-east-1.rds.amazonaws.com",
+        database="peer_lab_db",
+        user=user,
+        password=password,
+    ) as connection:
+        with connection.cursor(buffered=True) as cursor:
+            cursor.execute(query)
+            result = cursor.fetchall()
+    return result
+
+def sample_scridb_info(querys, query_col, creds):
+    
+    samples = get_sample(querys, query_col, creds)
+    
+    species = []
+    sc_tech = []
+    proj_id = []
+    reference = []
+    
+    for query in querys:
+        species += get_species(query, query_col, creds)
+        sc_tech += get_sc_tech(query, query_col, creds)
+        proj_id += get_project_id(query, query_col, creds)
+        reference += get_reference(query, query_col, creds)
+    
+    samples['species'] = species
+    samples['sc_tech'] = sc_tech
+    samples['project_id'] = proj_id
+    samples['reference'] = reference
+    
+    return samples
+
+
+def get_sample(querys, query_col, creds):
+    user = creds['user']
+    password = creds['password']
+    
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        query = f"""
+            SELECT Sample, AWS_storage, id
+            FROM {table_sample_data} 
+            """
+        
+        if len(querys) != 1:
+            query += f"WHERE {table_sample_data}.{query_col} IN {tuple(querys)}"
         else:
-            return super(NpEncoder, self).default(obj)
+            query += f'WHERE {table_sample_data}.{query_col} = "{querys[0]}"'
+
+        samples = execute_query(query, creds)
+        samples = pd.DataFrame(samples)
+        samples.columns = ['Sample', 'AWS_storage', 'id']
+        samples = samples.set_index('Sample')
+        
+        samples['AWS_storage'] = samples['AWS_storage'].str.strip('/')
+        return samples
+    
+    except Error as e:
+        print(f"Error: {e}")
+
+        
+def get_species(query, query_col, creds):
+    
+    user = creds['user']
+    password = creds['password']
+    
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_species = "peer_lab_db.species"
+        table_genome_idx = "peer_lab_db.genome_index"
+        query = f"""
+        SELECT {table_species}.Species
+        FROM {table_species}
+        LEFT JOIN {table_genome_idx}
+        ON {table_species}.id = {table_genome_idx}.species_id
+        LEFT JOIN {table_sample_data}
+        ON {table_genome_idx}.id = {table_sample_data}.genomeIndex_id
+        WHERE {table_sample_data}.{query_col} = "{query}"
+        """
+        
+        species = []
+        results = execute_query(query, creds)
+        for result in results:
+            species.append(result[0].lower())
+        return species
+    except Error as e:
+        print(f"Error: {e}")
+                       
+
+def get_sc_tech(query, query_col, creds):
+    
+    user = creds['user']
+    password = creds['password']
+
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_sc_tech = "peer_lab_db.sc_tech"
+        table_genome_idx = "peer_lab_db.genome_index"
+        query = f"""
+        SELECT {table_sc_tech}.sc_Tech
+        FROM {table_sc_tech}
+        LEFT JOIN {table_genome_idx}
+        ON {table_sc_tech}.id = {table_genome_idx}.scTech_id
+        LEFT JOIN {table_sample_data}
+        ON {table_genome_idx}.id = {table_sample_data}.genomeIndex_id
+        WHERE {table_sample_data}.{query_col} = "{query}"
+        """
+        sc_tech = []
+        results = execute_query(query, creds)
+        for result in results:
+            sc_tech.append(result[0])
+        return sc_tech
+    
+    except Error as e:
+        print(f"Error: {e}")
+        
+def get_project_id(query, query_col, creds):
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_project_data = "peer_lab_db.project_data"
+        query = f"""
+        SELECT {table_project_data}.projectName
+        FROM {table_project_data}
+        LEFT JOIN {table_sample_data}
+        ON {table_project_data}.id = {table_sample_data}.projectData_id
+        WHERE {table_sample_data}.{query_col} = "{query}"
+        """
+        
+        proj_id = []
+        results = execute_query(query, creds)
+        for result in results:
+            proj_id.append(result[0])
+        return proj_id
+    
+    except Error as e:
+        print(f"Error: {e}")
 
 
-# from SCRIdb
+def get_reference(query, query_col, creds):
+    
+    user = creds['user']
+    password = creds['password']
+
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_genome_idx = "peer_lab_db.genome_index"
+        query = f"""
+        SELECT {table_genome_idx}.gIndex
+        FROM {table_genome_idx}
+        LEFT JOIN {table_sample_data}
+        ON {table_genome_idx}.id = {table_sample_data}.genomeIndex_id
+        WHERE {table_sample_data}.{query_col} = "{query}"
+        """
+        
+        reference = []
+        results = execute_query(query, creds)
+        for result in results:
+            reference.append(result[0])
+        return reference
+    
+    except Error as e:
+        print(f"Error: {e}")
+        
+        
+########## FASTQ map ##########
+
+fastq_map = {
+    'CellRangerVdj': ['I1','R1','R2'],
+    'Hashtag': ['R1','R2'],
+    'CiteSeq': ['R1','R2'],
+    'AsapSeq': ['R1','R2','R3'],
+    'CellRangerATAC': ['I1','R1','R2','R3'],
+    'CellRangerGex': ['I1','R1','R2'],
+    'MitoTracing': ['R1', 'R2']
+}
+
+
+########## AWS S3 functions ##########
+
 def get_s3_objects(bucket, key, pattern, full_uri=False):
     s3r = boto3.resource("s3")
     bucket_s3 = s3r.Bucket(bucket)
@@ -32,53 +204,90 @@ def get_s3_objects(bucket, key, pattern, full_uri=False):
         objects = [f"s3://{bucket}/{o}" for o in objects]
     return objects
 
-
-def execute_query(query, user, password):
-    with connect(
-        host="peer-lab-db.cggxmlwgzzpw.us-east-1.rds.amazonaws.com",
-        database="peer_lab_db",
-        user=user,
-        password=password,
-    ) as connection:
-        with connection.cursor(buffered=True) as cursor:
-            cursor.execute(query)
-            result = cursor.fetchall()
-    return result
-
-
 # Get fastq file paths on S3 for each file id
 # Returns dictionary from id to s3 path
 # Throws exception if FASTQs don't exist for any id
 def get_fastqs(
     path: str, # path to directory containing FASTQ files
-    fastq_file_ids: list = None, # FASTQ file ids needed for this run type (e.g. I1, R1, R2, etc.)
+    fastq_file_ids: list, # FASTQ file ids needed for this run type (e.g. I1, R1, R2, etc.)
     folder: str = "",
 ):
     fastq_map = dict()
     _, bucket, key, _, _ = urllib.parse.urlsplit(f"{path}/{folder}")
-    # User may specify exactly which files are needed
-    if fastq_file_ids:
-        for fid in fastq_file_ids:
-            files = get_s3_objects(
-                bucket, key.lstrip("/"),
-                re.compile(f"_{fid}_\d{{3}}.fastq.gz$")
-            )
-            try:
-                assert files, f"AssertionError: Missing `{fid}` archives!"
-                fastq_map[fid] = [os.path.join("s3://", bucket, str(f)) for f in files]
-            except AssertionError as err:
-                logging.warning("%s\n\t %s", err, path)
-                return
-    # Default: get all FASTQs
-    else:
+    for fid in fastq_file_ids:
         files = get_s3_objects(
-                bucket, key.lstrip("/"),
-                re.compile(r"_\d{3}.fastq.gz$")
+            bucket, key.lstrip("/"),
+            re.compile(f"_{fid}_\d{{3}}.fastq.gz$")
         )
-        fastq_map["All"] = [os.path.join("s3://", bucket, str(f)) for f in files]
-
+        try:
+            assert files, f"AssertionError: Missing `{fid}` archives!"
+            fastq_map[fid] = [os.path.join("s3://", bucket, str(f)) for f in files]
+        except AssertionError as err:
+            logging.warning("%s\n\t %s", err, path)
+            return
     return fastq_map
 
+# Get every FASTQ in a folder
+def get_all_fastqs(
+    path: str, # path to directory containing FASTQ files
+    folder: str = "",
+):
+    _, bucket, key, _, _ = urllib.parse.urlsplit(f"{path}/{folder}")
+    files = get_s3_objects(
+        bucket, key.lstrip("/"),
+        re.compile(f".fastq.gz$")
+    )
+        
+    try:
+        fastqs = [os.path.join("s3://", bucket, str(f)) for f in files]
+    except AssertionError as err:
+        logging.warning("%s\n\t %s", err, path)
+        return
+    return fastqs
+
+
+########## Reference map ##########
+reference_map = {}
+
+reference_map['CellRangerArc'] = {
+    "human": "https://cf.10xgenomics.com/supp/cell-arc/refdata-cellranger-arc-GRCh38-2020-A.tar.gz",
+    "mouse": "https://cf.10xgenomics.com/supp/cell-arc/refdata-cellranger-arc-mm10-2020-A-2.0.0.tar.gz"
+}
+
+reference_map['CellRangerAtac'] = {
+    "human":"https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-GRCh38-2020-A-2.0.0.tar.gz",
+    "mouse":"https://cf.10xgenomics.com/supp/cell-atac/refdata-cellranger-arc-mm10-2020-A-2.0.0.tar.gz"
+}
+
+reference_map['CellRangerGex'] = {
+    "human":"https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz",
+    "mouse":"https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-mm10-2020-A.tar.gz"
+}
+
+reference_map['CellRangerCellPlex'] = {
+    "human":"https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz",
+    "mouse":"https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-mm10-2020-A.tar.gz"
+}
+
+reference_map['CellRangerVdj'] = {
+    "human":"GRCh38",
+    "mouse":"GRCm38"
+}
+
+def update_ref(samples, prefix):
+    for sample, row in samples.iterrows():
+        if prefix.startswith('CellRanger'):
+            if not row['reference'].startswith('https'):
+
+                if not row['species'] in ['human', 'mouse']:
+                    print(f'{sample} species unknown')
+                    samples.loc[sample, 'reference'] = np.nan
+                else:
+                    samples.loc[sample, 'reference'] = reference_map[prefix][row['species']]
+    return samples
+
+
+########## Misc functions ##########
 
 # Extract FASTQ sample name from list of files
 # Note: FASTQ name is file name up to lane id (e.g. L001, L002, etc.)
@@ -89,144 +298,20 @@ def get_fastqs_name(fastqs):
     return fastq_names[0]
 
 
-# Get species from database for given sample
-def get_species(sample_id, user, password):
-    try:
-        table_sample_data = "peer_lab_db.sample_data"
-        table_species = "peer_lab_db.species"
-        table_genome_idx = "peer_lab_db.genome_index"
-        query = f"""
-        SELECT {table_species}.Species
-        FROM {table_species}
-        LEFT JOIN {table_genome_idx}
-        ON {table_species}.id = {table_genome_idx}.species_id
-        LEFT JOIN {table_sample_data}
-        ON {table_genome_idx}.id = {table_sample_data}.genomeIndex_id
-        WHERE {table_sample_data}.id = {sample_id}
-        """
-        result = execute_query(query, user, password)[0][0]
-        return result.lower()
-    except Error as e:
-        print(f"Error: {e}")
+########## Run workflow ##########
 
-
-def get_sc_tech(sample_id, user, password):
-    try:
-        table_sample_data = "peer_lab_db.sample_data"
-        table_sc_tech = "peer_lab_db.sc_tech"
-        table_genome_idx = "peer_lab_db.genome_index"
-        query = f"""
-        SELECT {table_sc_tech}.sc_Tech
-        FROM {table_sc_tech}
-        LEFT JOIN {table_genome_idx}
-        ON {table_sc_tech}.id = {table_genome_idx}.scTech_id
-        LEFT JOIN {table_sample_data}
-        ON {table_genome_idx}.id = {table_sample_data}.genomeIndex_id
-        WHERE {table_sample_data}.id = {sample_id}
-        """
-        result = execute_query(query, user, password)[0][0]
-        return result
-    except Error as e:
-        print(f"Error: {e}")
-
-
-def get_sample_id(sample_name, user, password):
-    try:
-        table_sample_data = "peer_lab_db.sample_data"
-        query = f"""
-        SELECT {table_sample_data}.id
-        FROM {table_sample_data}
-        WHERE {table_sample_data}.Sample="{sample_name}"
-        """
-        result = execute_query(query, user, password)[0][0]
-        return result
-    except Error as e:
-        print(f"Error: {e}")
-
-
-def get_project_id(sample_id, user, password):
-    try:
-        table_sample_data = "peer_lab_db.sample_data"
-        table_project_data = "peer_lab_db.project_data"
-        query = f"""
-        SELECT {table_project_data}.projectName
-        FROM {table_project_data}
-        LEFT JOIN {table_sample_data}
-        ON {table_project_data}.id = {table_sample_data}.projectData_id
-        WHERE {table_sample_data}.id = {sample_id}
-        """
-        result = execute_query(query, user, password)[0][0]
-        return result
-    except Error as e:
-        print(f"Error: {e}")
-
-
-def get_SEQC_version(loc):
-    try:
-        cmd = f"aws s3 cp {loc}/seqc-results/seqc_log.txt -"
-        out = subprocess.run(
-            shlex.split(cmd), universal_newlines=True, capture_output=True
-            ).__dict__["stdout"]
-        version = re.match(r".*SEQC=v(\d+\.\d+\.\d+).*", out)[1]
-        return version
-    except:
-        return "N/A"
-
-
-def get_file_prefix(loc):
-    try:
-        cmd = f"aws s3 ls {loc}/seqc-results/"
-        out = subprocess.run(
-            shlex.split(cmd), universal_newlines=True, capture_output=True
-            ).__dict__["stdout"]
-
-        # Note: I'm expecting the aligned bam file to be in loc
-        bam_pattern = re.compile(r"(.*)_Aligned\.out\.bam$")
-        filename = list(filter(bam_pattern.match, out.split()))[0]
-        file_prefix = re.match(bam_pattern, filename)[1]
-        return file_prefix
-    except:
-        raise ValueError(f"BAM file not found in {loc}")
-
-
-def get_cr_reference(sample_id, prefix, user, password):
-    return get_reference(
-        sample_id, "CellRanger", prefix, user, password,
-    )
-
-
-def get_reference(
-    sample_id,
-    pipeline,
-    prefix,
-    user,
-    password,
-):
-    # Get species from database to decide reference
-    species = get_species(sample_id, user, password)
-
-    # Map to reference locations
-    try:
-        with open("utils/genomes-data.json") as f:
-            genomes_data = json.load(f)
-        return genomes_data[pipeline][prefix][species]
-    except:
-        raise ValueError(f"Unknown Species: {species}")
-
-
-def get_bc_whitelist(sample_id, user, password):
-    # Get version from database to decide whitelist
-    sc_tech = get_sc_tech(sample_id, user, password)
-    
-    # Map to reference locations
-    if "V3" in sc_tech:
-        return "s3://seqc-public/barcodes/ten_x_v3/flat/3M-february-2018.txt"
-    elif "V2" in sc_tech:
-        return "s3://seqc-public/barcodes/ten_x_v2/flat/737K-august-2016.txt"
-    else:
-        raise ValueError(f"Unknown Technology: {sc_tech}")
-
-
+# Numpy encoder for JSON from pandas series
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NpEncoder, self).default(obj)
+        
 def run(
     workflow_path: str,
     execp: str,
@@ -250,56 +335,19 @@ def run(
     return out
 
 
-# Get bc sequence data from database
-def get_bcs(sample_id, user, password):
-    try:
-        table_sample_data = "peer_lab_db.sample_data"
-        table_hashtag_barcodes = "peer_lab_db.hashtag_barcodes"
-        table_hashtags = "peer_lab_db.hashtags"
-        query = f"""
-        SELECT barcode_sequence, concat(substring(category, -1), barcode), 
-        demultiplex_label, bp_shift FROM {table_hashtags} 
-        LEFT JOIN {table_hashtag_barcodes} 
-        ON {table_hashtag_barcodes}.id = {table_hashtags}.hashtagBarcodes_id 
-        WHERE {table_hashtags}.sampleData_id = {sample_id}
-        """
-        result = execute_query(query, user, password)
-        return result
-    except Error as e:
-        print(f"Error: {e}")
-
-
-# Create csv files and upload to S3
-# Note: follow CellRanger instructions for naming columns:
-# https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/using/multi#examples
-def get_cmo_files(
-    samples: pd.DataFrame,
-    user: str,
-    password: str,
+# Get fastq file paths on S3 for each file id
+# Returns dictionary from id to s3 path
+# Throws exception if FASTQs don't exist for any id
+def get_mito_whitelist(
+    path: str, # path to directory containing FASTQ files
 ):
-    cmo_files = dict()
-    for name, sample in samples.iterrows():
-
-        # Get barcodes from database
-        bcs = pd.DataFrame.from_records(
-            get_bcs(sample['Sample_ID'], user, password),
-            columns=["sequence", "id", "sample_id", "bp_shift"],
+    _, bucket, key, _, _ = urllib.parse.urlsplit(path)
+    results = get_s3_objects(
+            bucket, key.lstrip("/"),
+            re.compile(f".txt$")
         )
-
-        # CMO map file
-        cmo_map = bcs[["sample_id", "id"]].copy().rename(
-            {"id": "cmo_ids"}, axis=1,
-        )
-        cmo_map["sample_id"] = cmo_map["sample_id"].str.replace(" ","_")
-
-        # CMO reference file
-        cmo_ref = bcs[["id", "sequence"]].copy()
-        cmo_ref["name"] = cmo_ref["id"]
-        cmo_ref["read"] = "R2"
-        cmo_ref["pattern"] = "5P(BC)"
-        cmo_ref["feature_type"] = "Multiplexing Capture"
-        order = ["id", "name", "read", "pattern", "sequence", "feature_type"]
-
-        cmo_files[name] = (cmo_map, cmo_ref[order])
-    
-    return cmo_files
+    whitelist = []
+    for result in results:
+        whitelist.append(os.path.join("s3://", bucket, result))
+    whitelist.sort()
+    return whitelist
