@@ -278,10 +278,11 @@ def update_ref(samples, prefix):
     for sample, row in samples.iterrows():
         if prefix.startswith('CellRanger'):
             if not row['reference'].startswith('https'):
-
-                if not row['species'] in ['human', 'mouse']:
-                    print(f'{sample} species unknown')
+                species = row['species']
+                if not species in ['human', 'mouse']:
+                    print(f'{species} reference not in database. Manually change "reference" field')
                     samples.loc[sample, 'reference'] = np.nan
+                    
                 else:
                     samples.loc[sample, 'reference'] = reference_map[prefix][row['species']]
     return samples
