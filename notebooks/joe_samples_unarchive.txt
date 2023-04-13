@@ -1,0 +1,14 @@
+,joe_sample_name,AWS_storage,sample
+0,RU1083_LIV,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1759_Ru1083_MITO/,Ru1083_MITO
+1,RU1083_T2,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1760_MSK_LX_1083c_T_2_MITO/,MSK_LX_1083c_T_2_MITO
+2,RU263_PDX,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1760_Ru263_MITO/,Ru263_MITO
+3,RU1083_T1,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1761_POSIE_101920_T_1_MITO/,POSIE_101920_T_1_MITO
+4,RU1083_ST,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1762_Ru1083d_MITO/,Ru1083d_MITO
+5,RU1250_T1,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1763_Ru1250C_T_1_MITO/,Ru1250C_T_1_MITO
+6,RU1250_PL,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1764_MSK_LX_1250b_PM_1_MITO/,MSK_LX_1250b_PM_1_MITO
+7,RU1250_T2,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1764_Ru1250D_T_1_MITO/,Ru1250D_T_1_MITO
+8,RU1250_ASC1,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1765_Ru1250e_MITO/,Ru1250e_MITO
+9,RU1250_ASC2,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/AV-1766_MSK_LX_1250f_MITO/,MSK_LX_1250f_MITO
+10,RU581_LIV,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/Ru581D_MITO/,Ru581D_MITO
+11,RU581_Ta,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/barcodes_rna/Ru581b_T1_MITO/,Ru581b_T1_MITO
+13,RU581_LNa,s3://dp-lab-data/SCRI_Projects/HTA/Mito_tracing/barcodes_rna/Ru581c-LN1_MITO/,Ru581c-LN1_MITO

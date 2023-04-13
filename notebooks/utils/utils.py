@@ -185,8 +185,9 @@ fastq_map = {
     'CiteSeq': ['R1','R2'],
     'AsapSeq': ['R1','R2','R3'],
     'CellRangerATAC': ['I1','R1','R2','R3'],
+    'CellRangerArc': ['I1','R1','R2','R3'],
     'CellRangerGex': ['I1','R1','R2'],
-    'MitoTracing': ['R1', 'R2']
+    'MitoTracing': ['R1', 'R2'],    
 }
 
 
@@ -276,16 +277,262 @@ reference_map['CellRangerVdj'] = {
 
 def update_ref(samples, prefix):
     for sample, row in samples.iterrows():
-        if prefix.startswith('CellRanger'):
+        species = row['species']
+        
+        if not row['reference']:
+            if species in ['human', 'mouse']:
+                samples.loc[sample, 'reference'] = reference_map[prefix][row['species']]
+
+        elif prefix.startswith('CellRanger'):
             if not row['reference'].startswith('https'):
-                species = row['species']
+                
                 if not species in ['human', 'mouse']:
                     print(f'{species} reference not in database. Manually change "reference" field')
                     samples.loc[sample, 'reference'] = np.nan
                     
                 else:
                     samples.loc[sample, 'reference'] = reference_map[prefix][row['species']]
+                                        
     return samples
+
+
+
+########## SHARP functions ##########
+
+# Priority of GEX data if multiple outputs are found in db
+sharp_wl_priority_map = {
+        m: ["SEQC", "CR_GEX"] for m in ["Hashtag", "CiteSeq"]
+    }
+# File patterns to search for in S3 for each accompanying pipeline
+sharp_wl_pattern_map = {
+    "SEQC": "_dense.csv$",
+    "CR_GEX": "/filtered_feature_bc_matrix/barcodes.tsv.gz$",
+    "CR_ATAC": "/filtered_peak_bc_matrix/barcodes.tsv"
+}
+sharp_wl_method_map = {
+    "SEQC": "SeqcDenseCountsMatrixCsv",
+    "CR_GEX": "10x",
+    "CR_ATAC": "10x",
+}
+# Names of FASTQ inputs in WDL; order is same as fastq_file_ids
+# TODO: Ask to change all inputs to "fastq{file_id}" or "uriFastq{file_id}"
+sharp_fastq_inputs_map = {
+    m: ["uriFastqR1", "uriFastqR2"] for m in ["Hashtag", "CiteSeq"]
+}
+
+# Get s3 path of existing GEX analysis files
+from mysql.connector import connect, Error
+
+def get_wl_dir(sample_id, creds):
+    
+    user = creds['user']
+    password = creds['password']
+
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_stats_data = "peer_lab_db.stats_data"
+        table_stats_data = "peer_lab_db.stats_data"
+        table_hashtag_lib = "peer_lab_db.hashtag_lib"
+        table_genome_index = "peer_lab_db.genome_index"
+        table_sc_tech = "peer_lab_db.sc_tech"
+        query = f"""
+        SELECT {table_stats_data}.analysis_storage
+        FROM {table_sample_data}
+        LEFT JOIN {table_stats_data} 
+        ON {table_stats_data}.sampleData_id = {table_sample_data}.id
+        LEFT JOIN {table_hashtag_lib}
+        ON {table_hashtag_lib}.sampleData_id = {table_sample_data}.id
+        LEFT JOIN {table_genome_index}
+        ON {table_genome_index}.id = {table_hashtag_lib}.genomeIndex_id
+        LEFT JOIN {table_sc_tech}
+        ON {table_sc_tech}.id = {table_genome_index}.scTech_id
+        WHERE {table_sample_data}.id = {sample_id}
+        """
+        result = execute_query(query, creds)[0][0]
+        if result: 
+            return result
+        # As backup, get AWS storage location directly from sample_data
+        else:
+            query = f"""
+            SELECT AWS_storage
+            FROM {table_sample_data}
+            WHERE {table_sample_data}.id = {sample_id}
+            """
+            result = execute_query(query, creds)[0][0]
+            return result
+    except Error as e:
+        print(f"Error: {e}")
+
+# Get white list method and associated file
+# Throws exception if no white list exists
+def get_wl_params(
+    sample_id: str,
+    creds,
+    prefix,
+    wl_dir
+):
+    
+    user = creds['user']
+    password = creds['password']
+
+    wl_params = dict()
+
+    # wl_dir = get_wl_dir(sample_id, creds)
+    wl_patterns = [sharp_wl_pattern_map[p] for p in sharp_wl_priority_map[prefix]]
+
+    try:
+        # Check white list file exists before loading info from database
+        assert wl_dir, f"Empty analysis storage for sample id {sample_id}"
+        _, bucket, key, _, _ = urllib.parse.urlsplit(wl_dir)
+        # White list file and method is first entry found on S3 
+        wl = pd.DataFrame(
+            [get_s3_objects(bucket, key.strip("/"), re.compile(p)) for p in wl_patterns],
+            index = sharp_wl_priority_map[prefix],
+        ).dropna(how="all")
+        try:
+            wl_key = wl.iloc[0,0] # if empty, missing white list file
+            wl_params["uri"] = os.path.join("s3://", bucket, wl_key)
+            wl_params["method"] = sharp_wl_method_map[wl.index[0]]
+        except IndexError:
+            logging.error(
+                "Path to barcodes or counts matrix of GEX data is missing!"
+            )
+            return
+
+    except AssertionError:
+        logging.warning(f"Path to GEX output results is missing for {sample_id}!")
+        return
+
+    return wl_params
+
+
+def get_bc_params(
+    sample_id,
+    creds,
+):
+    user = creds['user']
+    password = creds['password']
+
+    bc_params = dict()
+
+    # JSON of bc and UMI positions are stored in database
+    # First check dense matrix exists before loading JSON from database
+    bc_json = get_bc_json(sample_id, creds)
+    bc_pos = json.loads(bc_json)
+    bc_params["cb"] = bc_pos["cellbarcode"]
+    bc_params["umi"] = bc_params["cb"] + bc_pos["UMIs"]
+
+    # Get bc sequence data from database
+    bcs = get_bcs(sample_id, creds)
+    if not bcs:
+        logging.warning(f"Barcodes data Empty:\n\t {db_connect.cur.statement}")
+        return
+    for bc in bcs:
+        try:
+            assert bc[0], "AssertionError: Missing sequence barcodes!"
+            assert bc[1], "AssertionError: Missing barcode IDs"
+        except AssertionError as err:
+            logging.warning(f"{err}:\n\t {db_connect.cur.statement}")
+            return
+
+    barcodes = pd.DataFrame(bcs, columns=["sequence", "code", "label", "bp_shift"])
+    conjugation = barcodes["code"].str.get(0)
+    if conjugation.nunique() != 1:
+        logging.warning(
+            f"Sample has multiple hashtag barcode categories and will not be processed!"
+        )
+        return
+    else:
+        bc_params["conjugation"] = conjugation.values[0]
+
+    if barcodes["bp_shift"].nunique() != 1:
+        logging.warning(
+            f"Sample {sample_id} has hashtag barcode categories, with bp-shift length/s "
+            f"{barcodes['bp_shift'].unique()}, and will not be processed!"
+        )
+        return
+    else: 
+        bc_params["bp_shift"] = int(barcodes["bp_shift"][0])
+        bc_params["seq_length"] = bc_params["bp_shift"] + barcodes["sequence"].apply(len).max()
+
+    return bc_params
+
+
+# Get bc sequence data from database
+def get_bcs(sample_id, creds):
+    user = creds['user']
+    password = creds['password']
+    
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_hashtag_barcodes = "peer_lab_db.hashtag_barcodes"
+        table_hashtags = "peer_lab_db.hashtags"
+        query = f"""
+        SELECT barcode_sequence, concat(substring(category, -1), barcode), 
+        demultiplex_label, bp_shift FROM {table_hashtags} 
+        LEFT JOIN {table_hashtag_barcodes} 
+        ON {table_hashtag_barcodes}.id = {table_hashtags}.hashtagBarcodes_id 
+        WHERE {table_hashtags}.sampleData_id = {sample_id}
+        """
+        result = execute_query(query, creds)
+        return result
+    except Error as e:
+        print(f"Error: {e}")
+
+# Get bc and UMI positions from database stored in JSON format
+def get_bc_json(sample_id, creds):
+    
+    user = creds['user']
+    password = creds['password']
+
+    try:
+        table_sample_data = "peer_lab_db.sample_data"
+        table_stats_data = "peer_lab_db.stats_data"
+        table_stats_data = "peer_lab_db.stats_data"
+        table_hashtag_lib = "peer_lab_db.hashtag_lib"
+        table_genome_index = "peer_lab_db.genome_index"
+        table_sc_tech = "peer_lab_db.sc_tech"
+        query = f"""
+        SELECT barcodes
+        FROM {table_sample_data}
+        LEFT JOIN {table_stats_data} 
+        ON {table_stats_data}.sampleData_id = {table_sample_data}.id
+        LEFT JOIN {table_hashtag_lib}
+        ON {table_hashtag_lib}.sampleData_id = {table_sample_data}.id
+        LEFT JOIN {table_genome_index}
+        ON {table_genome_index}.id = {table_hashtag_lib}.genomeIndex_id
+        LEFT JOIN {table_sc_tech}
+        ON {table_sc_tech}.id = {table_genome_index}.scTech_id
+        WHERE {table_sample_data}.id = {sample_id}
+        """
+        result = execute_query(query, creds)[0][0]
+        return result
+    except Error as e:
+        print(f"Error: {e}")
+        
+# Get fastq file paths on S3 for each file id
+# Returns dictionary from id to s3 path
+# Throws exception if FASTQs don't exist for any id
+def get_denseCountMatrix(
+    path: str, # path to directory containing FASTQ files
+):
+    _, bucket, key, _, _ = urllib.parse.urlsplit(path)
+    results = get_s3_objects(
+            bucket, key.lstrip("/"),
+            re.compile(f"_dense.csv$")
+        )
+    whitelist = []
+    for result in results:
+        whitelist.append(os.path.join("s3://", bucket, result))
+    whitelist.sort()
+    return whitelist
+
+
+# Function to reformat barcode labels for Sharp
+def reformat_bc_label(label):
+    label = label.encode('ascii', 'namereplace').decode()
+    label = label.replace("\\N", "").replace(" ", "_")
+    return label
 
 
 ########## Misc functions ##########
@@ -346,6 +593,25 @@ def get_mito_whitelist(
     results = get_s3_objects(
             bucket, key.lstrip("/"),
             re.compile(f".txt$")
+        )
+    whitelist = []
+    for result in results:
+        whitelist.append(os.path.join("s3://", bucket, result))
+    whitelist.sort()
+    return whitelist
+
+
+# Get fastq file paths on S3 for each file id
+# Returns dictionary from id to s3 path
+# Throws exception if FASTQs don't exist for any id
+def get_aws_file(
+    path: str, # path to directory containing FASTQ files
+    file_end: str # Extension of the file
+):
+    _, bucket, key, _, _ = urllib.parse.urlsplit(path)
+    results = get_s3_objects(
+            bucket, key.lstrip("/"),
+            re.compile(f".{file_end}$")
         )
     whitelist = []
     for result in results:
